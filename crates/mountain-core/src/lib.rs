@@ -1,0 +1,151 @@
+//! The Core: what is drawn and when, behind traits for the renderer and the
+//! platform. It depends on no rendering, text or windowing crate.
+
+pub mod testing;
+
+/// A surface size in physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PhysicalSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A rectangle; logical units in the Core's content, physical pixels when
+/// handed to a renderer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// An sRGB colour with straight alpha.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+/// Draws one frame at a time onto a surface.
+pub trait Renderer {
+    fn begin_frame(&mut self, size: PhysicalSize);
+    fn fill_rect(&mut self, rect: Rect, color: Color);
+    fn end_frame(&mut self);
+}
+
+/// What a platform reports about the window the Core draws into.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowEvent {
+    Created {
+        size: PhysicalSize,
+        scale_factor: f64,
+    },
+    Resized(PhysicalSize),
+    ScaleFactorChanged {
+        scale_factor: f64,
+        size: PhysicalSize,
+    },
+    RedrawRequested,
+    CloseRequested,
+}
+
+/// What the Core asks of the platform after an event.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Response {
+    pub redraw: bool,
+    pub exit: bool,
+}
+
+/// Turns a windowing system's events into [`WindowEvent`]s, hands each to
+/// [`Core::handle`] with a renderer for the window, and acts on the
+/// [`Response`]. A platform backend does not pick the renderer: it is given a
+/// way to make one for each window it creates.
+pub trait Platform {
+    type Error;
+    fn run(&mut self, core: &mut Core) -> Result<(), Self::Error>;
+}
+
+/// Holds what is drawn, in logical units, and the surface it is drawn on.
+pub struct Core {
+    content: Vec<(Rect, Color)>,
+    size: Option<PhysicalSize>,
+    scale_factor: f64,
+}
+
+impl Default for Core {
+    fn default() -> Core {
+        Core::new()
+    }
+}
+
+impl Core {
+    pub fn new() -> Core {
+        Core {
+            content: Vec::new(),
+            size: None,
+            scale_factor: 1.0,
+        }
+    }
+
+    pub fn with_rect(mut self, rect: Rect, color: Color) -> Core {
+        self.content.push((rect, color));
+        self
+    }
+
+    pub fn handle(&mut self, event: WindowEvent, renderer: &mut dyn Renderer) -> Response {
+        match event {
+            WindowEvent::Created { size, scale_factor } => {
+                self.size = Some(size);
+                self.scale_factor = scale_factor;
+                Response {
+                    redraw: true,
+                    exit: false,
+                }
+            }
+            WindowEvent::Resized(size) => {
+                self.size = Some(size);
+                Response {
+                    redraw: true,
+                    exit: false,
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, size } => {
+                self.scale_factor = scale_factor;
+                self.size = Some(size);
+                Response {
+                    redraw: true,
+                    exit: false,
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                self.draw(renderer);
+                Response::default()
+            }
+            WindowEvent::CloseRequested => Response {
+                redraw: false,
+                exit: true,
+            },
+        }
+    }
+
+    fn draw(&self, renderer: &mut dyn Renderer) {
+        let Some(size) = self.size.filter(|s| s.width > 0 && s.height > 0) else {
+            return;
+        };
+        let k = self.scale_factor;
+        renderer.begin_frame(size);
+        for &(r, color) in &self.content {
+            let physical = Rect {
+                x: r.x * k,
+                y: r.y * k,
+                width: r.width * k,
+                height: r.height * k,
+            };
+            renderer.fill_rect(physical, color);
+        }
+        renderer.end_frame();
+    }
+}

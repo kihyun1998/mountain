@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["prototypes"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.0.0"
+publish = false

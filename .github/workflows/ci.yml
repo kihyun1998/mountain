@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --all --check
+      - run: cargo build --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Core depends on no rendering, text or windowing crate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p mountain-core --edges normal,build --all-features --target all --prefix none)
+          forbidden=$(grep -E '^(wgpu|vello|parley|cosmic-text|swash|skrifa|winit)([_-][A-Za-z0-9_-]+)? v' <<< "$tree" || true)
+          if [ -n "$forbidden" ]; then
+            echo "mountain-core depends on:"
+            echo "$forbidden"
+            exit 1
+          fi
