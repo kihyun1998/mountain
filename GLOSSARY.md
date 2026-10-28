@@ -5,7 +5,7 @@ A Rust UI framework with built-in state management that draws its own UI on ever
 ## Language
 
 **Core**:
-The part of the framework that holds the state model, the widget tree, layout and events, and depends on no rendering, text or windowing crate.
+The part of the framework that holds the state model, the tree of Instances and Host nodes, layout and events, and depends on no rendering, text or windowing crate.
 _Avoid_: engine, runtime
 
 **Backend**:
@@ -19,3 +19,17 @@ _Avoid_: layout props, size hints
 **Semantics tree**:
 The description of the UI's meaning (roles, labels, actions) that assistive technology reads, with a stable id per node.
 _Avoid_: accessibility tree, a11y tree
+
+## The tree
+
+**Component**:
+A piece of UI described by its props, whose render produces the Components and Host nodes under it; it is created anew on every render.
+_Avoid_: widget, view
+
+**Instance**:
+The kept counterpart of a Component across renders, holding its state and its place in the tree.
+_Avoid_: element, fiber
+
+**Host node**:
+A node the framework itself lays out and draws, as opposed to a Component.
+_Avoid_: render object, DOM node
