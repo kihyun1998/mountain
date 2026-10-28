@@ -1,0 +1,3 @@
+# Reuse infrastructure crates until one becomes a bottleneck
+
+Windowing, GPU access, 2D rendering, text layout and accessibility come from existing crates (candidates such as winit, wgpu, Vello, Parley and AccessKit are compared in `docs/research/rust-ui-framework-first-steps.md`), and we write our own replacement only when one of them becomes a measured bottleneck. These layers are what every UI framework needs and none is what sets this one apart; building them first, text layout above all, would spend the project's time before the state model and widget tree exist. Flutter took the same route: it started on Skia and replaced only the part that became a problem, with Impeller (https://docs.flutter.dev/perf/impeller).

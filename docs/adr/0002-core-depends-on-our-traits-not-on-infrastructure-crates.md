@@ -1,0 +1,3 @@
+# The core depends on our traits, not on infrastructure crates
+
+The core crate defines traits for the layers ADR-0001 borrows (rendering, text layout, the platform: windows and input), and crates such as wgpu, Vello, Parley and winit appear only as implementations of those traits in separate crates. This is what makes ADR-0001's "replace it when it becomes a bottleneck" possible without rewriting the core, and it lets the state model and widget tree run and be tested with no window or GPU, the way React's reconciler runs against a host config (`packages/react-reconciler/README.md` in react/react). The cost is an abstraction layer written before there is a second implementation to shape it.

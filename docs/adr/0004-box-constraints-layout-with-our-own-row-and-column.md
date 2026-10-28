@@ -1,0 +1,3 @@
+# Box-constraints layout, with our own Row and Column
+
+Layout follows Flutter's box-constraints rule (a parent passes constraints down, the child returns a size, the parent sets the position; https://docs.flutter.dev/ui/layout/constraints), because that rule is what shapes the widget API and it is the part of the framework we want to own. Row and Column are written by us with Flutter's semantics so the framework keeps a single layout model; Taffy is used only inside a Grid widget, where the CSS Grid algorithm is too large to be worth writing ourselves (ADR-0001). Using Taffy for Flex as well was rejected because CSS flex semantics would then sit beside the box-constraints model and differ from Flutter's Row and Column in small ways.
