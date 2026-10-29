@@ -2,12 +2,23 @@
 //! platform. It depends on no rendering, text or windowing crate.
 
 pub mod testing;
+mod tree;
+
+use tree::DrawCommand;
+pub use tree::{ColoredBox, DisplayList, HostNode, NodeId, Tree};
 
 /// A surface size in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PhysicalSize {
     pub width: u32,
     pub height: u32,
+}
+
+/// A size in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LogicalSize {
+    pub width: f64,
+    pub height: f64,
 }
 
 /// A rectangle in logical pixels.
@@ -104,10 +115,10 @@ pub trait Platform {
     fn run(&mut self, core: &mut Core) -> Result<(), Self::Error>;
 }
 
-/// Holds what is drawn, in logical pixels, and the surface it is drawn on.
+/// Holds the tree of Host nodes and the surface it is drawn on.
 pub struct Core {
     background: Option<Color>,
-    content: Vec<(LogicalRect, Color)>,
+    tree: Tree,
     size: Option<PhysicalSize>,
     scale_factor: f64,
     occluded: bool,
@@ -125,7 +136,7 @@ impl Core {
     pub fn new() -> Core {
         Core {
             background: None,
-            content: Vec::new(),
+            tree: Tree::new(),
             size: None,
             scale_factor: 1.0,
             occluded: false,
@@ -133,15 +144,18 @@ impl Core {
         }
     }
 
-    /// Fills the whole surface with `color` before the content.
+    /// Fills the whole surface with `color` before the tree.
     pub fn with_background(mut self, color: Color) -> Core {
         self.background = Some(color);
         self
     }
 
-    pub fn with_rect(mut self, rect: LogicalRect, color: Color) -> Core {
-        self.content.push((rect, color));
-        self
+    pub fn tree(&self) -> &Tree {
+        &self.tree
+    }
+
+    pub fn tree_mut(&mut self) -> &mut Tree {
+        &mut self.tree
     }
 
     pub fn handle(
@@ -214,9 +228,21 @@ impl Core {
             };
             renderer.fill_rect(whole, color);
         }
-        for &(rect, color) in &self.content {
-            renderer.fill_rect(rect.to_physical(self.scale_factor), color);
-        }
+        let scale_factor = self.scale_factor;
+        self.tree.paint(&mut |list, x, y| {
+            for command in list.commands() {
+                match *command {
+                    DrawCommand::FillRect(rect, color) => {
+                        let placed = LogicalRect {
+                            x: rect.x + x,
+                            y: rect.y + y,
+                            ..rect
+                        };
+                        renderer.fill_rect(placed.to_physical(scale_factor), color);
+                    }
+                }
+            }
+        });
         renderer.end_frame()
     }
 }

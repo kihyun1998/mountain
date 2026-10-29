@@ -2,8 +2,8 @@
 //! and `winit` features, the Vello renderer and the winit platform.
 
 pub use mountain_core::{
-    Color, Core, FrameOutcome, LogicalRect, PhysicalRect, PhysicalSize, Platform, RenderError,
-    Renderer, Response, WindowEvent,
+    Color, ColoredBox, Core, DisplayList, FrameOutcome, HostNode, LogicalRect, LogicalSize, NodeId,
+    PhysicalRect, PhysicalSize, Platform, RenderError, Renderer, Response, Tree, WindowEvent,
 };
 
 #[cfg(feature = "vello")]

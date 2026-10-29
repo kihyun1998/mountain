@@ -1,7 +1,7 @@
 use mountain_core::testing::{Command, Frame, RecordingRenderer, TestPlatform};
 use mountain_core::{
-    Color, Core, FrameOutcome, LogicalRect, PhysicalRect, PhysicalSize, Platform, Response,
-    WindowEvent,
+    Color, ColoredBox, Core, FrameOutcome, LogicalRect, PhysicalRect, PhysicalSize, Platform,
+    Response, WindowEvent,
 };
 
 const RED: Color = Color {
@@ -34,7 +34,11 @@ fn size(width: u32, height: u32) -> PhysicalSize {
 }
 
 fn core() -> Core {
-    Core::new().with_rect(logical(10.0, 10.0, 100.0, 50.0), RED)
+    let mut core = Core::new();
+    let root = core.tree().root();
+    core.tree_mut()
+        .add(root, logical(10.0, 10.0, 100.0, 50.0), ColoredBox::new(RED));
+    core
 }
 
 fn run(events: Vec<WindowEvent>) -> TestPlatform {
@@ -142,7 +146,7 @@ fn a_zero_sized_surface_is_not_drawn() {
 }
 
 #[test]
-fn a_background_fills_the_whole_surface_before_the_content() {
+fn a_background_fills_the_whole_surface_before_the_tree() {
     let white = Color {
         r: 255,
         g: 255,
