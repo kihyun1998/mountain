@@ -43,6 +43,10 @@ On macOS at scale 2, with only "skip on Occluded" and no repayment: a window res
 
 - Any run on Windows or Linux; those are built in CI only.
 
-## Seen, not fixed
+## Live resize on macOS
 
-Dragging the window's corner on macOS (2026-10-29, by hand): the rectangle shakes while the drag lasts and is in place once it ends, with exit code 0 on close. Masonry turns on `presents_with_transaction` during a live resize to keep frames in step with the window (`masonry_winit` `vello_util.rs`, `event_loop_runner.rs`, as reported by a source read, not opened here); doing that needs a signal that a live resize is under way, which no trait carries yet.
+Dragging the window's corner made the rectangle shake for as long as the drag lasted (seen by hand, 2026-10-29): during a live resize the window changes size inside a Core Animation transaction while Metal presented frames on its own schedule. The Vello renderer now sets `presentsWithTransaction` on the surface's `CAMetalLayer` for frames at a new size and clears it on the first frame at an unchanged size; the same drag then showed no shake.
+
+- It lives in the renderer because winit 0.30 tells the app nothing about a live resize: `windowWillStartLiveResize:` and `windowDidEndLiveResize:` only adjust resize increments (`winit-0.30.13/src/platform_impl/macos/window_delegate.rs`). A size change between frames is the signal the renderer already has, so no trait carries one. After a drag ends the flag stays set until the next frame; that costs speed, not correctness.
+- The layer flag alone is enough. wgpu-hal 30 reads `presentsWithTransaction()` when it acquires a texture and, when set, presents after `waitUntilScheduled` (`wgpu-hal-30.0.1/src/metal/surface.rs`, `metal/mod.rs`). Masonry reconfigures the surface after changing the flag (`masonry_winit` `vello_util.rs`, `on_window_resize_state_change`); with wgpu 30 that is not needed, so the renderer does not.
+- Reaching the layer goes through `Surface::as_hal::<Metal>()`, an `unsafe` function in wgpu 30; that call is the repository's only `unsafe` block.

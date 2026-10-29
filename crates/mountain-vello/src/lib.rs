@@ -27,6 +27,9 @@ pub struct VelloRenderer {
     target: Box<dyn Fn() -> SurfaceTarget<'static> + Send>,
     /// Set by the current device's lost callback.
     device_lost: DeviceLost,
+    /// Whether the Metal layer presents inside the Core Animation transaction.
+    #[cfg(target_os = "macos")]
+    presents_with_transaction: bool,
 }
 
 impl VelloRenderer {
@@ -54,6 +57,8 @@ impl VelloRenderer {
             scene: Scene::new(),
             target,
             device_lost,
+            #[cfg(target_os = "macos")]
+            presents_with_transaction: false,
         })
     }
 
@@ -91,6 +96,11 @@ impl VelloRenderer {
             self.dev_id = surface.dev_id;
         }
         self.config = surface.config.clone();
+        #[cfg(target_os = "macos")]
+        {
+            set_presents_with_transaction(&surface, false);
+            self.presents_with_transaction = false;
+        }
         self.surface = Some(surface);
         Ok(())
     }
@@ -168,13 +178,23 @@ impl VelloRenderer {
 }
 
 impl Renderer for VelloRenderer {
+    /// A frame at a new size counts as part of a live resize; on macOS it is
+    /// presented inside the Core Animation transaction until a frame arrives
+    /// at an unchanged size.
     fn begin_frame(&mut self, size: PhysicalSize) {
-        if let Some(surface) = self.surface.as_mut()
-            && (surface.config.width, surface.config.height) != (size.width, size.height)
-        {
-            self.context
-                .resize_surface(surface, size.width, size.height);
-            self.config = surface.config.clone();
+        if let Some(surface) = self.surface.as_mut() {
+            let resizing =
+                (surface.config.width, surface.config.height) != (size.width, size.height);
+            if resizing {
+                self.context
+                    .resize_surface(surface, size.width, size.height);
+                self.config = surface.config.clone();
+            }
+            #[cfg(target_os = "macos")]
+            if resizing != self.presents_with_transaction {
+                set_presents_with_transaction(surface, resizing);
+                self.presents_with_transaction = resizing;
+            }
         }
         self.scene.reset();
     }
@@ -192,5 +212,25 @@ impl Renderer for VelloRenderer {
             return Err(error);
         }
         self.present()
+    }
+}
+
+/// Sets whether the surface's Metal layer presents inside the Core Animation
+/// transaction. Does nothing when the surface is not on the Metal backend.
+#[cfg(target_os = "macos")]
+fn set_presents_with_transaction(surface: &RenderSurface<'_>, on: bool) {
+    // SAFETY: `as_hal` asks for two things. The HAL surface must not be
+    // destroyed unless the guard is the last reference and the GPU is not
+    // using it: nothing here destroys it, and the guard is dropped at the end
+    // of this function. wgpu-hal's own rules must be kept: the layer is reached
+    // through the `Mutex` wgpu-hal itself locks around it (`render_layer`), on
+    // the thread that acquires and presents, and only `presentsWithTransaction`
+    // is set, which wgpu-hal reads when it next acquires a texture.
+    let hal_surface = unsafe { surface.surface.as_hal::<wgpu::hal::api::Metal>() };
+    if let Some(hal_surface) = hal_surface {
+        hal_surface
+            .render_layer()
+            .lock()
+            .setPresentsWithTransaction(on);
     }
 }
