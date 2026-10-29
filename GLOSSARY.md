@@ -34,6 +34,14 @@ _Avoid_: element, fiber
 A node the framework itself lays out and draws, as opposed to a Component.
 _Avoid_: render object, DOM node
 
+**Node id**:
+The identity of one Host node, never given to another Host node, even after the first is removed.
+_Avoid_: widget id, element id, key
+
+**Display list**:
+The drawing commands a Host node records when it paints, kept and replayed until the node changes.
+_Avoid_: scene, picture, draw list
+
 ## Units
 
 **Logical pixel**:
