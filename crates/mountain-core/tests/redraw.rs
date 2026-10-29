@@ -1,6 +1,7 @@
 use mountain_core::testing::{Command, Frame, RecordingRenderer, TestPlatform};
 use mountain_core::{
-    Color, Core, FrameOutcome, PhysicalSize, Platform, Rect, Response, WindowEvent,
+    Color, Core, FrameOutcome, LogicalRect, PhysicalRect, PhysicalSize, Platform, Response,
+    WindowEvent,
 };
 
 const RED: Color = Color {
@@ -10,8 +11,17 @@ const RED: Color = Color {
     a: 255,
 };
 
-fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
-    Rect {
+fn logical(x: f64, y: f64, width: f64, height: f64) -> LogicalRect {
+    LogicalRect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn physical(x: f64, y: f64, width: f64, height: f64) -> PhysicalRect {
+    PhysicalRect {
         x,
         y,
         width,
@@ -24,7 +34,7 @@ fn size(width: u32, height: u32) -> PhysicalSize {
 }
 
 fn core() -> Core {
-    Core::new().with_rect(rect(10.0, 10.0, 100.0, 50.0), RED)
+    Core::new().with_rect(logical(10.0, 10.0, 100.0, 50.0), RED)
 }
 
 fn run(events: Vec<WindowEvent>) -> TestPlatform {
@@ -43,7 +53,7 @@ fn creating_then_resizing_draws_the_rectangle_at_each_size() {
         },
         WindowEvent::Resized(size(1024, 768)),
     ]);
-    let drawn = Command::FillRect(rect(10.0, 10.0, 100.0, 50.0), RED);
+    let drawn = Command::FillRect(physical(10.0, 10.0, 100.0, 50.0), RED);
     assert_eq!(
         platform.renderer.frames,
         [
@@ -105,11 +115,11 @@ fn the_rectangle_is_scaled_to_physical_pixels() {
         [
             Frame {
                 size: size(1600, 1200),
-                commands: vec![Command::FillRect(rect(20.0, 20.0, 200.0, 100.0), RED)],
+                commands: vec![Command::FillRect(physical(20.0, 20.0, 200.0, 100.0), RED)],
             },
             Frame {
                 size: size(1200, 900),
-                commands: vec![Command::FillRect(rect(15.0, 15.0, 150.0, 75.0), RED)],
+                commands: vec![Command::FillRect(physical(15.0, 15.0, 150.0, 75.0), RED)],
             },
         ]
     );
@@ -146,8 +156,8 @@ fn a_background_fills_the_whole_surface_before_the_content() {
     assert_eq!(
         platform.renderer.frames[0].commands,
         [
-            Command::FillRect(rect(0.0, 0.0, 800.0, 600.0), white),
-            Command::FillRect(rect(20.0, 20.0, 200.0, 100.0), RED),
+            Command::FillRect(physical(0.0, 0.0, 800.0, 600.0), white),
+            Command::FillRect(physical(20.0, 20.0, 200.0, 100.0), RED),
         ]
     );
 }
@@ -221,4 +231,10 @@ fn a_frame_lost_to_occlusion_is_not_retried_while_occluded() {
     platform.renderer.outcomes = vec![FrameOutcome::Occluded];
     let Ok(()) = platform.run(&mut core);
     assert_eq!(platform.renderer.frames.len(), 1);
+}
+
+#[test]
+fn a_logical_rectangle_converts_to_physical_pixels_at_a_fractional_scale() {
+    let converted = logical(10.0, 4.0, 100.0, 50.0).to_physical(1.5);
+    assert_eq!(converted, physical(15.0, 6.0, 150.0, 75.0));
 }

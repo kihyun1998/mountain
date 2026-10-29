@@ -1,10 +1,12 @@
 //! A platform and a renderer for driving the Core with no window and no GPU.
 
-use crate::{Color, Core, FrameOutcome, PhysicalSize, Platform, Rect, Renderer, WindowEvent};
+use crate::{
+    Color, Core, FrameOutcome, PhysicalRect, PhysicalSize, Platform, Renderer, WindowEvent,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
-    FillRect(Rect, Color),
+    FillRect(PhysicalRect, Color),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,7 +30,7 @@ impl Renderer for RecordingRenderer {
             commands: Vec::new(),
         });
     }
-    fn fill_rect(&mut self, rect: Rect, color: Color) {
+    fn fill_rect(&mut self, rect: PhysicalRect, color: Color) {
         self.frames
             .last_mut()
             .expect("fill_rect outside a frame")

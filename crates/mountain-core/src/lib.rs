@@ -10,10 +10,30 @@ pub struct PhysicalSize {
     pub height: u32,
 }
 
-/// A rectangle; logical units in the Core's content, physical pixels when
-/// handed to a renderer.
+/// A rectangle in logical pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rect {
+pub struct LogicalRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl LogicalRect {
+    /// The same rectangle in physical pixels at `scale_factor`.
+    pub fn to_physical(self, scale_factor: f64) -> PhysicalRect {
+        PhysicalRect {
+            x: self.x * scale_factor,
+            y: self.y * scale_factor,
+            width: self.width * scale_factor,
+            height: self.height * scale_factor,
+        }
+    }
+}
+
+/// A rectangle in physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhysicalRect {
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -32,7 +52,7 @@ pub struct Color {
 /// Draws one frame at a time onto a surface. A frame's size is never zero.
 pub trait Renderer {
     fn begin_frame(&mut self, size: PhysicalSize);
-    fn fill_rect(&mut self, rect: Rect, color: Color);
+    fn fill_rect(&mut self, rect: PhysicalRect, color: Color);
     fn end_frame(&mut self) -> FrameOutcome;
 }
 
@@ -81,10 +101,10 @@ pub trait Platform {
     fn run(&mut self, core: &mut Core) -> Result<(), Self::Error>;
 }
 
-/// Holds what is drawn, in logical units, and the surface it is drawn on.
+/// Holds what is drawn, in logical pixels, and the surface it is drawn on.
 pub struct Core {
     background: Option<Color>,
-    content: Vec<(Rect, Color)>,
+    content: Vec<(LogicalRect, Color)>,
     size: Option<PhysicalSize>,
     scale_factor: f64,
     occluded: bool,
@@ -116,7 +136,7 @@ impl Core {
         self
     }
 
-    pub fn with_rect(mut self, rect: Rect, color: Color) -> Core {
+    pub fn with_rect(mut self, rect: LogicalRect, color: Color) -> Core {
         self.content.push((rect, color));
         self
     }
@@ -176,10 +196,9 @@ impl Core {
         let Some(size) = self.size.filter(|s| s.width > 0 && s.height > 0) else {
             return FrameOutcome::Presented;
         };
-        let k = self.scale_factor;
         renderer.begin_frame(size);
         if let Some(color) = self.background {
-            let whole = Rect {
+            let whole = PhysicalRect {
                 x: 0.0,
                 y: 0.0,
                 width: f64::from(size.width),
@@ -187,14 +206,8 @@ impl Core {
             };
             renderer.fill_rect(whole, color);
         }
-        for &(r, color) in &self.content {
-            let physical = Rect {
-                x: r.x * k,
-                y: r.y * k,
-                width: r.width * k,
-                height: r.height * k,
-            };
-            renderer.fill_rect(physical, color);
+        for &(rect, color) in &self.content {
+            renderer.fill_rect(rect.to_physical(self.scale_factor), color);
         }
         renderer.end_frame()
     }

@@ -1,6 +1,6 @@
 //! A renderer Backend that draws the Core's frames with Vello on wgpu.
 
-use mountain_core::{Color, FrameOutcome, PhysicalSize, Rect, Renderer};
+use mountain_core::{Color, FrameOutcome, PhysicalRect, PhysicalSize, Renderer};
 use vello::kurbo::Affine;
 use vello::peniko::Fill;
 use vello::util::{RenderContext, RenderSurface};
@@ -116,7 +116,7 @@ impl Renderer for VelloRenderer {
         self.scene.reset();
     }
 
-    fn fill_rect(&mut self, rect: Rect, color: Color) {
+    fn fill_rect(&mut self, rect: PhysicalRect, color: Color) {
         let shape =
             vello::kurbo::Rect::new(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
         let brush = vello::peniko::Color::from_rgba8(color.r, color.g, color.b, color.a);
