@@ -29,5 +29,8 @@ On macOS at scale 2, with only "skip on Occluded" and no repayment: a window res
 
 ## Not tried
 
-- Live drag-resize on macOS with the window in front. Masonry turns on `presents_with_transaction` during a live resize to keep frames in step with the window (`masonry_winit` `vello_util.rs`, `event_loop_runner.rs`).
 - Any run on Windows or Linux; those are built in CI only.
+
+## Seen, not fixed
+
+Dragging the window's corner on macOS (2026-10-29, by hand): the rectangle shakes while the drag lasts and is in place once it ends, with exit code 0 on close. Masonry turns on `presents_with_transaction` during a live resize to keep frames in step with the window (`masonry_winit` `vello_util.rs`, `event_loop_runner.rs`, as reported by a source read, not opened here); doing that needs a signal that a live resize is under way, which no trait carries yet.
