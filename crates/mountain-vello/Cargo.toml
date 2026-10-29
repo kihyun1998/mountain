@@ -1,0 +1,10 @@
+[package]
+name = "mountain-vello"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mountain-core = { path = "../mountain-core" }
+pollster = "1"
+vello = "0.11"

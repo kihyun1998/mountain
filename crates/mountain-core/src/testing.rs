@@ -1,6 +1,6 @@
 //! A platform and a renderer for driving the Core with no window and no GPU.
 
-use crate::{Color, Core, PhysicalSize, Platform, Rect, Renderer, WindowEvent};
+use crate::{Color, Core, FrameOutcome, PhysicalSize, Platform, Rect, Renderer, WindowEvent};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -17,6 +17,8 @@ pub struct Frame {
 #[derive(Default)]
 pub struct RecordingRenderer {
     pub frames: Vec<Frame>,
+    /// Outcomes to report for the next frames, in order; then `Presented`.
+    pub outcomes: Vec<FrameOutcome>,
 }
 
 impl Renderer for RecordingRenderer {
@@ -33,7 +35,13 @@ impl Renderer for RecordingRenderer {
             .commands
             .push(Command::FillRect(rect, color));
     }
-    fn end_frame(&mut self) {}
+    fn end_frame(&mut self) -> FrameOutcome {
+        if self.outcomes.is_empty() {
+            FrameOutcome::Presented
+        } else {
+            self.outcomes.remove(0)
+        }
+    }
 }
 
 /// Feeds a fixed list of events, answering each redraw request with a
@@ -60,9 +68,16 @@ impl Platform for TestPlatform {
     fn run(&mut self, core: &mut Core) -> Result<(), Self::Error> {
         for event in std::mem::take(&mut self.events) {
             let response = core.handle(event, &mut self.renderer);
-            if response.redraw {
-                core.handle(WindowEvent::RedrawRequested, &mut self.renderer);
+            let mut redraw = response.redraw;
+            for _ in 0..100 {
+                if !redraw {
+                    break;
+                }
+                redraw = core
+                    .handle(WindowEvent::RedrawRequested, &mut self.renderer)
+                    .redraw;
             }
+            assert!(!redraw, "the Core kept asking for redraws");
             if response.exit {
                 self.exited = true;
                 return Ok(());

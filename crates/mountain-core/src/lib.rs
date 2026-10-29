@@ -29,11 +29,22 @@ pub struct Color {
     pub a: u8,
 }
 
-/// Draws one frame at a time onto a surface.
+/// Draws one frame at a time onto a surface. A frame's size is never zero.
 pub trait Renderer {
     fn begin_frame(&mut self, size: PhysicalSize);
     fn fill_rect(&mut self, rect: Rect, color: Color);
-    fn end_frame(&mut self);
+    fn end_frame(&mut self) -> FrameOutcome;
+}
+
+/// What became of a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameOutcome {
+    /// The frame reached the screen, or there was nothing to draw.
+    Presented,
+    /// The window is occluded; the frame is drawn again once it is visible.
+    Occluded,
+    /// The surface could not take the frame now; it is drawn again at once.
+    Retry,
 }
 
 /// What a platform reports about the window the Core draws into.
@@ -48,6 +59,8 @@ pub enum WindowEvent {
         scale_factor: f64,
         size: PhysicalSize,
     },
+    /// Whether the window is hidden from view, minimised or covered.
+    Occluded(bool),
     RedrawRequested,
     CloseRequested,
 }
@@ -70,9 +83,13 @@ pub trait Platform {
 
 /// Holds what is drawn, in logical units, and the surface it is drawn on.
 pub struct Core {
+    background: Option<Color>,
     content: Vec<(Rect, Color)>,
     size: Option<PhysicalSize>,
     scale_factor: f64,
+    occluded: bool,
+    /// A frame is owed: one was asked for but did not reach the screen.
+    pending: bool,
 }
 
 impl Default for Core {
@@ -84,10 +101,19 @@ impl Default for Core {
 impl Core {
     pub fn new() -> Core {
         Core {
+            background: None,
             content: Vec::new(),
             size: None,
             scale_factor: 1.0,
+            occluded: false,
+            pending: false,
         }
+    }
+
+    /// Fills the whole surface with `color` before the content.
+    pub fn with_background(mut self, color: Color) -> Core {
+        self.background = Some(color);
+        self
     }
 
     pub fn with_rect(mut self, rect: Rect, color: Color) -> Core {
@@ -120,9 +146,24 @@ impl Core {
                     exit: false,
                 }
             }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                Response {
+                    redraw: !occluded && self.pending,
+                    exit: false,
+                }
+            }
             WindowEvent::RedrawRequested => {
-                self.draw(renderer);
-                Response::default()
+                if self.occluded {
+                    self.pending = true;
+                    return Response::default();
+                }
+                let outcome = self.draw(renderer);
+                self.pending = outcome == FrameOutcome::Occluded;
+                Response {
+                    redraw: outcome == FrameOutcome::Retry,
+                    exit: false,
+                }
             }
             WindowEvent::CloseRequested => Response {
                 redraw: false,
@@ -131,12 +172,21 @@ impl Core {
         }
     }
 
-    fn draw(&self, renderer: &mut dyn Renderer) {
+    fn draw(&self, renderer: &mut dyn Renderer) -> FrameOutcome {
         let Some(size) = self.size.filter(|s| s.width > 0 && s.height > 0) else {
-            return;
+            return FrameOutcome::Presented;
         };
         let k = self.scale_factor;
         renderer.begin_frame(size);
+        if let Some(color) = self.background {
+            let whole = Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(size.width),
+                height: f64::from(size.height),
+            };
+            renderer.fill_rect(whole, color);
+        }
         for &(r, color) in &self.content {
             let physical = Rect {
                 x: r.x * k,
@@ -146,6 +196,6 @@ impl Core {
             };
             renderer.fill_rect(physical, color);
         }
-        renderer.end_frame();
+        renderer.end_frame()
     }
 }

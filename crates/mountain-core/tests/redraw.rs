@@ -1,5 +1,7 @@
 use mountain_core::testing::{Command, Frame, RecordingRenderer, TestPlatform};
-use mountain_core::{Color, Core, PhysicalSize, Platform, Rect, Response, WindowEvent};
+use mountain_core::{
+    Color, Core, FrameOutcome, PhysicalSize, Platform, Rect, Response, WindowEvent,
+};
 
 const RED: Color = Color {
     r: 255,
@@ -125,4 +127,98 @@ fn a_zero_sized_surface_is_not_drawn() {
     ]);
     let sizes: Vec<_> = platform.renderer.frames.iter().map(|f| f.size).collect();
     assert_eq!(sizes, [size(800, 600)]);
+}
+
+#[test]
+fn a_background_fills_the_whole_surface_before_the_content() {
+    let white = Color {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    let mut core = core().with_background(white);
+    let mut platform = TestPlatform::new(vec![WindowEvent::Created {
+        size: size(800, 600),
+        scale_factor: 2.0,
+    }]);
+    let Ok(()) = platform.run(&mut core);
+    assert_eq!(
+        platform.renderer.frames[0].commands,
+        [
+            Command::FillRect(rect(0.0, 0.0, 800.0, 600.0), white),
+            Command::FillRect(rect(20.0, 20.0, 200.0, 100.0), RED),
+        ]
+    );
+}
+
+#[test]
+fn a_frame_lost_to_occlusion_is_drawn_again_once_the_window_is_visible() {
+    let mut core = core();
+    let mut platform = TestPlatform::new(vec![
+        WindowEvent::Created {
+            size: size(800, 600),
+            scale_factor: 1.0,
+        },
+        WindowEvent::Occluded(false),
+    ]);
+    platform.renderer.outcomes = vec![FrameOutcome::Occluded];
+    let Ok(()) = platform.run(&mut core);
+    let sizes: Vec<_> = platform.renderer.frames.iter().map(|f| f.size).collect();
+    assert_eq!(sizes, [size(800, 600), size(800, 600)]);
+}
+
+#[test]
+fn nothing_is_drawn_while_the_window_is_occluded() {
+    let mut core = core();
+    let mut platform = TestPlatform::new(vec![
+        WindowEvent::Created {
+            size: size(800, 600),
+            scale_factor: 1.0,
+        },
+        WindowEvent::Occluded(true),
+        WindowEvent::Resized(size(900, 300)),
+        WindowEvent::Resized(size(1000, 400)),
+        WindowEvent::Occluded(false),
+    ]);
+    let Ok(()) = platform.run(&mut core);
+    let sizes: Vec<_> = platform.renderer.frames.iter().map(|f| f.size).collect();
+    assert_eq!(sizes, [size(800, 600), size(1000, 400)]);
+}
+
+#[test]
+fn becoming_visible_with_nothing_pending_draws_nothing() {
+    let platform = run(vec![
+        WindowEvent::Created {
+            size: size(800, 600),
+            scale_factor: 1.0,
+        },
+        WindowEvent::Occluded(true),
+        WindowEvent::Occluded(false),
+    ]);
+    assert_eq!(platform.renderer.frames.len(), 1);
+}
+
+#[test]
+fn a_frame_the_renderer_asks_to_retry_is_drawn_again_at_once() {
+    let mut core = core();
+    let mut platform = TestPlatform::new(vec![WindowEvent::Created {
+        size: size(800, 600),
+        scale_factor: 1.0,
+    }]);
+    platform.renderer.outcomes = vec![FrameOutcome::Retry];
+    let Ok(()) = platform.run(&mut core);
+    assert_eq!(platform.renderer.frames.len(), 2);
+}
+
+#[test]
+fn a_frame_lost_to_occlusion_is_not_retried_while_occluded() {
+    let mut core = core();
+    let mut platform = TestPlatform::new(vec![WindowEvent::Created {
+        size: size(800, 600),
+        scale_factor: 1.0,
+    }]);
+    platform.renderer.outcomes = vec![FrameOutcome::Occluded];
+    let Ok(()) = platform.run(&mut core);
+    assert_eq!(platform.renderer.frames.len(), 1);
 }

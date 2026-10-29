@@ -1,0 +1,9 @@
+[package]
+name = "mountain-winit"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mountain-core = { path = "../mountain-core" }
+winit = "0.30"

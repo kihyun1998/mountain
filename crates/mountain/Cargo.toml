@@ -6,3 +6,7 @@ publish.workspace = true
 
 [dependencies]
 mountain-core = { path = "../mountain-core" }
+
+[dev-dependencies]
+mountain-vello = { path = "../mountain-vello" }
+mountain-winit = { path = "../mountain-winit" }
