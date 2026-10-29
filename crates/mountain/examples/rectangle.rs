@@ -1,8 +1,6 @@
 //! A window on a white background with a red rectangle, redrawn on resize.
 
-use mountain::{Color, Core, LogicalRect, Platform};
-use mountain_vello::VelloRenderer;
-use mountain_winit::WinitPlatform;
+use mountain::{Color, Core, LogicalRect, Platform, VelloRenderer, WinitPlatform};
 
 fn main() {
     let white = Color {

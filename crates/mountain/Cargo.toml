@@ -4,9 +4,19 @@ edition.workspace = true
 version.workspace = true
 publish.workspace = true
 
+[features]
+default = ["vello", "winit"]
+vello = ["dep:mountain-vello"]
+winit = ["dep:mountain-winit"]
+
 [dependencies]
 mountain-core = { path = "../mountain-core" }
+mountain-vello = { path = "../mountain-vello", optional = true }
+mountain-winit = { path = "../mountain-winit", optional = true }
+
+[[example]]
+name = "rectangle"
+required-features = ["vello", "winit"]
 
 [dev-dependencies]
-mountain-vello = { path = "../mountain-vello" }
-mountain-winit = { path = "../mountain-winit" }
+winit = "0.30"

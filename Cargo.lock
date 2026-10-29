@@ -880,6 +880,7 @@ dependencies = [
  "mountain-core",
  "mountain-vello",
  "mountain-winit",
+ "winit",
 ]
 
 [[package]]
