@@ -1,5 +1,6 @@
 //! The tree of Host nodes the Core draws, and the Display lists they paint.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,7 +26,7 @@ impl NodeId {
 }
 
 /// A node the framework lays out and draws.
-pub trait HostNode {
+pub trait HostNode: Any {
     /// Records how this node looks at `size`, in its own coordinates and in
     /// logical pixels.
     fn paint(&self, size: LogicalSize, list: &mut DisplayList);
@@ -91,14 +92,17 @@ struct Entry {
     node: Box<dyn HostNode>,
     /// Position relative to the parent, and size, in logical pixels.
     bounds: LogicalRect,
+    /// `None` only for the root.
+    parent: Option<NodeId>,
     children: Vec<NodeId>,
 }
 
 impl Entry {
-    fn new(node: Box<dyn HostNode>, bounds: LogicalRect) -> Entry {
+    fn new(node: Box<dyn HostNode>, bounds: LogicalRect, parent: Option<NodeId>) -> Entry {
         Entry {
             node,
             bounds,
+            parent,
             children: Vec::new(),
         }
     }
@@ -130,7 +134,7 @@ impl Tree {
             width: 0.0,
             height: 0.0,
         };
-        entries.insert(root, Entry::new(Box::new(Root), origin));
+        entries.insert(root, Entry::new(Box::new(Root), origin, None));
         Tree { entries, root }
     }
 
@@ -144,15 +148,11 @@ impl Tree {
     /// # Panics
     ///
     /// If `parent` is not a Host node in this tree.
-    pub fn add(
-        &mut self,
-        parent: NodeId,
-        bounds: LogicalRect,
-        node: impl HostNode + 'static,
-    ) -> NodeId {
+    pub fn add(&mut self, parent: NodeId, bounds: LogicalRect, node: impl HostNode) -> NodeId {
         let id = NodeId::next();
         self.entry_mut(parent).children.push(id);
-        self.entries.insert(id, Entry::new(Box::new(node), bounds));
+        self.entries
+            .insert(id, Entry::new(Box::new(node), bounds, Some(parent)));
         id
     }
 
@@ -160,9 +160,76 @@ impl Tree {
     ///
     /// # Panics
     ///
-    /// If `id` is not a Host node in this tree.
+    /// If `id` is not a Host node in this tree, or is the root.
     pub fn set_bounds(&mut self, id: NodeId, bounds: LogicalRect) {
-        self.entry_mut(id).bounds = bounds;
+        let entry = self.entry_mut(id);
+        assert!(
+            entry.parent.is_some(),
+            "the root stays at the window's origin"
+        );
+        entry.bounds = bounds;
+    }
+
+    /// Whether `id` is a Host node in this tree.
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.entries.contains_key(&id)
+    }
+
+    /// Hands the Host node `id` to `change` as a `T`. This is the one way to
+    /// change a Host node's values.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not a Host node in this tree, or is not a `T`.
+    pub fn update<T: HostNode>(&mut self, id: NodeId, change: impl FnOnce(&mut T)) {
+        let entry = self.entry_mut(id);
+        let node: &mut dyn Any = entry.node.as_mut();
+        match node.downcast_mut::<T>() {
+            Some(node) => change(node),
+            None => panic!("{id:?} is not a {}", std::any::type_name::<T>()),
+        }
+    }
+
+    /// Removes `id` and every Host node under it.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not a Host node in this tree, or is the root.
+    pub fn remove(&mut self, id: NodeId) {
+        let parent = self.parent_of(id, "the root cannot be removed");
+        self.entry_mut(parent).children.retain(|&child| child != id);
+        let mut doomed = vec![id];
+        while let Some(next) = doomed.pop() {
+            let entry = self.entries.remove(&next).expect("a child is in the tree");
+            doomed.extend(entry.children);
+        }
+    }
+
+    /// Moves `id` to `index` among its parent's children, which sets where
+    /// it is drawn among its siblings.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not a Host node in this tree, is the root, or `index` is
+    /// past the last of its parent's children.
+    pub fn move_to(&mut self, id: NodeId, index: usize) {
+        let parent = self.parent_of(id, "the root has no siblings");
+        let children = &mut self.entry_mut(parent).children;
+        let count = children.len();
+        assert!(
+            index < count,
+            "index {index} is past the last of the {count} children of {id:?}'s parent"
+        );
+        children.retain(|&child| child != id);
+        children.insert(index, id);
+    }
+
+    /// The parent of `id`, or a panic with `root_message` if `id` is the root.
+    fn parent_of(&self, id: NodeId, root_message: &str) -> NodeId {
+        match self.entry(id).parent {
+            Some(parent) => parent,
+            None => panic!("{root_message}"),
+        }
     }
 
     fn entry(&self, id: NodeId) -> &Entry {
