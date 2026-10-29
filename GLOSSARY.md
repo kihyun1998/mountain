@@ -33,3 +33,17 @@ _Avoid_: element, fiber
 **Host node**:
 A node the framework itself lays out and draws, as opposed to a Component.
 _Avoid_: render object, DOM node
+
+## Units
+
+**Logical pixel**:
+A unit of length that does not depend on the display; one logical pixel covers as many physical pixels as the scale factor says.
+_Avoid_: point, dp, device-independent pixel
+
+**Physical pixel**:
+One pixel of the surface a frame is drawn into.
+_Avoid_: device pixel, raw pixel
+
+**Scale factor**:
+How many physical pixels one logical pixel spans along each axis.
+_Avoid_: DPI, density, zoom
