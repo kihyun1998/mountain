@@ -95,6 +95,9 @@ struct Entry {
     /// `None` only for the root.
     parent: Option<NodeId>,
     children: Vec<NodeId>,
+    /// The Display list from the last paint; `None` until the node paints
+    /// again.
+    display_list: Option<DisplayList>,
 }
 
 impl Entry {
@@ -104,6 +107,7 @@ impl Entry {
             bounds,
             parent,
             children: Vec::new(),
+            display_list: None,
         }
     }
 }
@@ -167,6 +171,9 @@ impl Tree {
             entry.parent.is_some(),
             "the root stays at the window's origin"
         );
+        if (entry.bounds.width, entry.bounds.height) != (bounds.width, bounds.height) {
+            entry.display_list = None;
+        }
         entry.bounds = bounds;
     }
 
@@ -183,6 +190,7 @@ impl Tree {
     /// If `id` is not a Host node in this tree, or is not a `T`.
     pub fn update<T: HostNode>(&mut self, id: NodeId, change: impl FnOnce(&mut T)) {
         let entry = self.entry_mut(id);
+        entry.display_list = None;
         let node: &mut dyn Any = entry.node.as_mut();
         match node.downcast_mut::<T>() {
             Some(node) => change(node),
@@ -249,11 +257,24 @@ impl Tree {
     /// Calls `draw` with each Host node's Display list and the window
     /// position of the node's origin, parents before children and children
     /// in order.
-    pub(crate) fn paint(&self, draw: &mut dyn FnMut(&DisplayList, f64, f64)) {
-        self.paint_from(self.root, 0.0, 0.0, draw);
+    ///
+    /// A Host node paints only when it has no Display list kept.
+    pub(crate) fn paint(&mut self, draw: &mut dyn FnMut(&DisplayList, f64, f64)) {
+        for entry in self.entries.values_mut() {
+            if entry.display_list.is_none() {
+                let mut list = DisplayList::new();
+                let size = LogicalSize {
+                    width: entry.bounds.width,
+                    height: entry.bounds.height,
+                };
+                entry.node.paint(size, &mut list);
+                entry.display_list = Some(list);
+            }
+        }
+        self.draw_from(self.root, 0.0, 0.0, draw);
     }
 
-    fn paint_from(
+    fn draw_from(
         &self,
         id: NodeId,
         parent_x: f64,
@@ -263,15 +284,13 @@ impl Tree {
         let entry = self.entry(id);
         let x = parent_x + entry.bounds.x;
         let y = parent_y + entry.bounds.y;
-        let mut list = DisplayList::new();
-        let size = LogicalSize {
-            width: entry.bounds.width,
-            height: entry.bounds.height,
-        };
-        entry.node.paint(size, &mut list);
-        draw(&list, x, y);
+        let list = entry
+            .display_list
+            .as_ref()
+            .expect("every Host node has painted before the walk");
+        draw(list, x, y);
         for &child in &entry.children {
-            self.paint_from(child, x, y, draw);
+            self.draw_from(child, x, y, draw);
         }
     }
 }

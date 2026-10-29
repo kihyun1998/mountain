@@ -1,8 +1,11 @@
 //! A platform and a renderer for driving the Core with no window and no GPU.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::{
-    Color, Core, FrameOutcome, PhysicalRect, PhysicalSize, Platform, RenderError, Renderer,
-    WindowEvent,
+    Color, Core, DisplayList, FrameOutcome, HostNode, LogicalRect, LogicalSize, PhysicalRect,
+    PhysicalSize, Platform, RenderError, Renderer, WindowEvent,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,5 +95,32 @@ impl Platform for TestPlatform {
             }
         }
         Ok(())
+    }
+}
+
+/// A Host node that fills its box with `color` and counts how often it
+/// paints.
+pub struct PaintCounter {
+    pub color: Color,
+    count: Rc<Cell<usize>>,
+}
+
+impl PaintCounter {
+    /// Adds one to `count` each time the node paints.
+    pub fn new(color: Color, count: Rc<Cell<usize>>) -> PaintCounter {
+        PaintCounter { color, count }
+    }
+}
+
+impl HostNode for PaintCounter {
+    fn paint(&self, size: LogicalSize, list: &mut DisplayList) {
+        self.count.set(self.count.get() + 1);
+        let whole = LogicalRect {
+            x: 0.0,
+            y: 0.0,
+            width: size.width,
+            height: size.height,
+        };
+        list.fill_rect(whole, self.color);
     }
 }

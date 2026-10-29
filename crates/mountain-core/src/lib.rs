@@ -214,7 +214,7 @@ impl Core {
         Ok(response)
     }
 
-    fn draw(&self, renderer: &mut dyn Renderer) -> Result<FrameOutcome, RenderError> {
+    fn draw(&mut self, renderer: &mut dyn Renderer) -> Result<FrameOutcome, RenderError> {
         let Some(size) = self.size.filter(|s| s.width > 0 && s.height > 0) else {
             return Ok(FrameOutcome::Presented);
         };
