@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use mountain_core::{Core, PhysicalSize, Platform, Renderer, Response, WindowEvent};
+use mountain_core::{Core, PhysicalSize, Platform, RenderError, Renderer, Response, WindowEvent};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent as WinitEvent;
@@ -16,6 +16,8 @@ pub use winit::window::Window as WinitWindow;
 pub enum Error {
     EventLoop(winit::error::EventLoopError),
     Window(winit::error::OsError),
+    /// The renderer could not be made for the window, or could not draw.
+    Renderer(RenderError),
 }
 
 impl std::fmt::Display for Error {
@@ -23,6 +25,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::EventLoop(e) => write!(f, "the event loop failed: {e}"),
             Error::Window(e) => write!(f, "creating the window failed: {e}"),
+            Error::Renderer(e) => write!(f, "the renderer failed: {e}"),
         }
     }
 }
@@ -31,7 +34,8 @@ impl std::error::Error for Error {}
 
 /// Opens one window and feeds its events to the Core. `make_renderer` is
 /// called once the window exists, with the window to draw into and its size
-/// in physical pixels. `run` has to be called on the main thread, and once
+/// in physical pixels; its error, or one from drawing, ends `run` with
+/// [`Error::Renderer`]. `run` has to be called on the main thread, and once
 /// per process: winit allows one event loop.
 pub struct WinitPlatform<F> {
     title: String,
@@ -39,10 +43,11 @@ pub struct WinitPlatform<F> {
     make_renderer: F,
 }
 
-impl<R, F> WinitPlatform<F>
+impl<R, E, F> WinitPlatform<F>
 where
     R: Renderer,
-    F: FnMut(Arc<Window>, PhysicalSize) -> R,
+    F: FnMut(Arc<Window>, PhysicalSize) -> Result<R, E>,
+    E: Into<RenderError>,
 {
     /// `size` is the window's inner size in logical pixels.
     pub fn new(title: impl Into<String>, size: (f64, f64), make_renderer: F) -> Self {
@@ -54,10 +59,11 @@ where
     }
 }
 
-impl<R, F> Platform for WinitPlatform<F>
+impl<R, E, F> Platform for WinitPlatform<F>
 where
     R: Renderer,
-    F: FnMut(Arc<Window>, PhysicalSize) -> R,
+    F: FnMut(Arc<Window>, PhysicalSize) -> Result<R, E>,
+    E: Into<RenderError>,
 {
     type Error = Error;
 
@@ -96,7 +102,14 @@ where
         let Some((window, renderer)) = &mut self.window else {
             return;
         };
-        let Response { redraw, exit } = self.core.handle(event, renderer);
+        let Response { redraw, exit } = match self.core.handle(event, renderer) {
+            Ok(response) => response,
+            Err(e) => {
+                self.error.get_or_insert(Error::Renderer(e));
+                event_loop.exit();
+                return;
+            }
+        };
         if redraw {
             window.request_redraw();
         }
@@ -106,10 +119,11 @@ where
     }
 }
 
-impl<F, R> ApplicationHandler for App<'_, F, R>
+impl<F, R, E> ApplicationHandler for App<'_, F, R>
 where
     R: Renderer,
-    F: FnMut(Arc<Window>, PhysicalSize) -> R,
+    F: FnMut(Arc<Window>, PhysicalSize) -> Result<R, E>,
+    E: Into<RenderError>,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -128,7 +142,14 @@ where
             }
         };
         let size = physical(window.inner_size());
-        let renderer = (self.platform.make_renderer)(window.clone(), size);
+        let renderer = match (self.platform.make_renderer)(window.clone(), size) {
+            Ok(renderer) => renderer,
+            Err(e) => {
+                self.error = Some(Error::Renderer(e.into()));
+                event_loop.exit();
+                return;
+            }
+        };
         let created = WindowEvent::Created {
             size: physical(window.inner_size()),
             scale_factor: window.scale_factor(),

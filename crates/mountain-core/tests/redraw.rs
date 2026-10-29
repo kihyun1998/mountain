@@ -40,7 +40,7 @@ fn core() -> Core {
 fn run(events: Vec<WindowEvent>) -> TestPlatform {
     let mut core = core();
     let mut platform = TestPlatform::new(events);
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     platform
 }
 
@@ -73,7 +73,9 @@ fn creating_then_resizing_draws_the_rectangle_at_each_size() {
 fn close_asks_the_platform_to_exit_and_draws_nothing() {
     let mut core = core();
     let mut renderer = RecordingRenderer::default();
-    let response = core.handle(WindowEvent::CloseRequested, &mut renderer);
+    let response = core
+        .handle(WindowEvent::CloseRequested, &mut renderer)
+        .unwrap();
     assert_eq!(
         response,
         Response {
@@ -152,7 +154,7 @@ fn a_background_fills_the_whole_surface_before_the_content() {
         size: size(800, 600),
         scale_factor: 2.0,
     }]);
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     assert_eq!(
         platform.renderer.frames[0].commands,
         [
@@ -173,7 +175,7 @@ fn a_frame_lost_to_occlusion_is_drawn_again_once_the_window_is_visible() {
         WindowEvent::Occluded(false),
     ]);
     platform.renderer.outcomes = vec![FrameOutcome::Occluded];
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     let sizes: Vec<_> = platform.renderer.frames.iter().map(|f| f.size).collect();
     assert_eq!(sizes, [size(800, 600), size(800, 600)]);
 }
@@ -191,7 +193,7 @@ fn nothing_is_drawn_while_the_window_is_occluded() {
         WindowEvent::Resized(size(1000, 400)),
         WindowEvent::Occluded(false),
     ]);
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     let sizes: Vec<_> = platform.renderer.frames.iter().map(|f| f.size).collect();
     assert_eq!(sizes, [size(800, 600), size(1000, 400)]);
 }
@@ -217,7 +219,7 @@ fn a_frame_the_renderer_asks_to_retry_is_drawn_again_at_once() {
         scale_factor: 1.0,
     }]);
     platform.renderer.outcomes = vec![FrameOutcome::Retry];
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     assert_eq!(platform.renderer.frames.len(), 2);
 }
 
@@ -229,7 +231,7 @@ fn a_frame_lost_to_occlusion_is_not_retried_while_occluded() {
         scale_factor: 1.0,
     }]);
     platform.renderer.outcomes = vec![FrameOutcome::Occluded];
-    let Ok(()) = platform.run(&mut core);
+    platform.run(&mut core).unwrap();
     assert_eq!(platform.renderer.frames.len(), 1);
 }
 
@@ -237,4 +239,39 @@ fn a_frame_lost_to_occlusion_is_not_retried_while_occluded() {
 fn a_logical_rectangle_converts_to_physical_pixels_at_a_fractional_scale() {
     let converted = logical(10.0, 4.0, 100.0, 50.0).to_physical(1.5);
     assert_eq!(converted, physical(15.0, 6.0, 150.0, 75.0));
+}
+
+#[test]
+fn a_renderer_error_is_returned_by_handle() {
+    let mut core = core();
+    let mut renderer = RecordingRenderer::default();
+    core.handle(
+        WindowEvent::Created {
+            size: size(800, 600),
+            scale_factor: 1.0,
+        },
+        &mut renderer,
+    )
+    .unwrap();
+    renderer.fail_next = Some("device lost".to_string());
+    let error = core
+        .handle(WindowEvent::RedrawRequested, &mut renderer)
+        .unwrap_err();
+    assert_eq!(error.to_string(), "device lost");
+}
+
+#[test]
+fn a_renderer_error_ends_the_run_with_that_error() {
+    let mut core = core();
+    let mut platform = TestPlatform::new(vec![
+        WindowEvent::Created {
+            size: size(800, 600),
+            scale_factor: 1.0,
+        },
+        WindowEvent::Resized(size(1024, 768)),
+    ]);
+    platform.renderer.fail_next = Some("device lost".to_string());
+    let error = platform.run(&mut core).unwrap_err();
+    assert_eq!(error.to_string(), "device lost");
+    assert_eq!(platform.renderer.frames.len(), 1);
 }

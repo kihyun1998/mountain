@@ -1,6 +1,8 @@
 //! A renderer Backend that draws the Core's frames with Vello on wgpu.
 
-use mountain_core::{Color, FrameOutcome, PhysicalRect, PhysicalSize, Renderer};
+use std::sync::{Arc, Mutex};
+
+use mountain_core::{Color, FrameOutcome, PhysicalRect, PhysicalSize, RenderError, Renderer};
 use vello::kurbo::Affine;
 use vello::peniko::Fill;
 use vello::util::{RenderContext, RenderSurface};
@@ -9,55 +11,114 @@ use vello::{AaConfig, RenderParams, RendererOptions, Scene};
 
 pub use vello::Error;
 
-/// Draws onto one window's surface.
+/// Set to the reason once a device's lost callback has fired.
+type DeviceLost = Arc<Mutex<Option<String>>>;
+
+/// Draws onto one window's surface, keeping the window and the surface's
+/// last configuration.
 pub struct VelloRenderer {
     context: RenderContext,
-    surface: RenderSurface<'static>,
+    /// `None` only after recreating a lost surface failed.
+    surface: Option<RenderSurface<'static>>,
+    config: wgpu::SurfaceConfiguration,
+    dev_id: usize,
     renderer: vello::Renderer,
     scene: Scene,
+    target: Box<dyn Fn() -> SurfaceTarget<'static> + Send>,
+    /// Set by the current device's lost callback.
+    device_lost: DeviceLost,
 }
 
 impl VelloRenderer {
     /// Creates a surface for `target` and a GPU device that can present to it.
-    pub fn new(
-        target: impl Into<SurfaceTarget<'static>>,
-        size: PhysicalSize,
-    ) -> Result<Self, Error> {
+    pub fn new<T>(target: T, size: PhysicalSize) -> Result<Self, Error>
+    where
+        T: Clone + Into<SurfaceTarget<'static>> + Send + 'static,
+    {
         let mut context = RenderContext::new();
+        let target: Box<dyn Fn() -> SurfaceTarget<'static> + Send> =
+            Box::new(move || target.clone().into());
         let surface = pollster::block_on(context.create_surface(
-            target,
+            target(),
             size.width.max(1),
             size.height.max(1),
             wgpu::PresentMode::AutoVsync,
         ))?;
-        let renderer = vello::Renderer::new(
-            &context.devices[surface.dev_id].device,
-            RendererOptions::default(),
-        )?;
+        let (renderer, device_lost) = Self::renderer_for(&context, surface.dev_id)?;
         Ok(VelloRenderer {
+            config: surface.config.clone(),
+            dev_id: surface.dev_id,
+            surface: Some(surface),
             context,
-            surface,
             renderer,
             scene: Scene::new(),
+            target,
+            device_lost,
         })
     }
 
-    fn present(&mut self) -> Result<FrameOutcome, Error> {
-        let device = &self.context.devices[self.surface.dev_id];
+    /// A Vello renderer on device `dev_id`, and the flag that device's lost
+    /// callback sets.
+    fn renderer_for(
+        context: &RenderContext,
+        dev_id: usize,
+    ) -> Result<(vello::Renderer, DeviceLost), Error> {
+        let device = &context.devices[dev_id].device;
+        let device_lost: DeviceLost = Arc::new(Mutex::new(None));
+        let flag = device_lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            *flag.lock().unwrap() = Some(format!("{reason:?}: {message}"));
+        });
+        let renderer = vello::Renderer::new(device, RendererOptions::default())?;
+        Ok((renderer, device_lost))
+    }
+
+    /// Creates the surface again for the same window and configuration. The
+    /// old surface is dropped first, before a new swapchain is made.
+    fn recreate_surface(&mut self) -> Result<(), Error> {
+        self.surface = None;
+        let surface = self.context.instance.create_surface((self.target)())?;
+        let surface = pollster::block_on(self.context.create_render_surface(
+            surface,
+            self.config.width,
+            self.config.height,
+            self.config.present_mode,
+        ))?;
+        if surface.dev_id != self.dev_id {
+            let (renderer, device_lost) = Self::renderer_for(&self.context, surface.dev_id)?;
+            self.renderer = renderer;
+            self.device_lost = device_lost;
+            self.dev_id = surface.dev_id;
+        }
+        self.config = surface.config.clone();
+        self.surface = Some(surface);
+        Ok(())
+    }
+
+    fn lost_device(&self) -> Option<RenderError> {
+        let reason = self.device_lost.lock().unwrap().clone()?;
+        Some(format!("the GPU device was lost ({reason})").into())
+    }
+
+    fn present(&mut self) -> Result<FrameOutcome, RenderError> {
+        let Some(surface) = self.surface.as_mut() else {
+            return Err("the window's surface is gone".into());
+        };
+        let device = &self.context.devices[surface.dev_id];
         let params = RenderParams {
             base_color: vello::peniko::Color::TRANSPARENT,
-            width: self.surface.config.width,
-            height: self.surface.config.height,
+            width: surface.config.width,
+            height: surface.config.height,
             antialiasing_method: AaConfig::Msaa16,
         };
         self.renderer.render_to_texture(
             &device.device,
             &device.queue,
             &self.scene,
-            &self.surface.target_view,
+            &surface.target_view,
             &params,
         )?;
-        let acquired = self.surface.surface.get_current_texture();
+        let acquired = surface.surface.get_current_texture();
         let stale = match acquired {
             CurrentSurfaceTexture::Success(texture) => Ok(texture),
             CurrentSurfaceTexture::Suboptimal(texture) => {
@@ -67,16 +128,20 @@ impl VelloRenderer {
             CurrentSurfaceTexture::Outdated => Err(()),
             CurrentSurfaceTexture::Occluded => return Ok(FrameOutcome::Occluded),
             CurrentSurfaceTexture::Timeout => return Ok(FrameOutcome::Retry),
-            CurrentSurfaceTexture::Lost => panic!("the window's surface was lost"),
-            CurrentSurfaceTexture::Validation => {
-                panic!("validation error getting the surface texture")
+            CurrentSurfaceTexture::Lost => {
+                self.recreate_surface()?;
+                return Ok(FrameOutcome::Retry);
             }
+            CurrentSurfaceTexture::Validation => match self.lost_device() {
+                Some(error) => return Err(error),
+                None => panic!("validation error getting the surface texture"),
+            },
         };
         let texture = match stale {
             Ok(texture) => texture,
             Err(()) => {
-                self.context.configure_surface(&self.surface);
-                match self.surface.surface.get_current_texture() {
+                self.context.configure_surface(surface);
+                match surface.surface.get_current_texture() {
                     CurrentSurfaceTexture::Success(texture) => texture,
                     _ => return Ok(FrameOutcome::Retry),
                 }
@@ -90,28 +155,26 @@ impl VelloRenderer {
         let view = texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.surface.blitter.copy(
-            &device.device,
-            &mut encoder,
-            &self.surface.target_view,
-            &view,
-        );
+        surface
+            .blitter
+            .copy(&device.device, &mut encoder, &surface.target_view, &view);
         device.queue.submit([encoder.finish()]);
         device.queue.present(texture);
-        device
-            .device
-            .poll(wgpu::PollType::Poll)
-            .expect("polling the GPU device failed");
+        if let Err(e) = device.device.poll(wgpu::PollType::Poll) {
+            return Err(format!("polling the GPU device failed: {e}").into());
+        }
         Ok(FrameOutcome::Presented)
     }
 }
 
 impl Renderer for VelloRenderer {
     fn begin_frame(&mut self, size: PhysicalSize) {
-        let config = &self.surface.config;
-        if (config.width, config.height) != (size.width, size.height) {
+        if let Some(surface) = self.surface.as_mut()
+            && (surface.config.width, surface.config.height) != (size.width, size.height)
+        {
             self.context
-                .resize_surface(&mut self.surface, size.width, size.height);
+                .resize_surface(surface, size.width, size.height);
+            self.config = surface.config.clone();
         }
         self.scene.reset();
     }
@@ -124,10 +187,10 @@ impl Renderer for VelloRenderer {
             .fill(Fill::NonZero, Affine::IDENTITY, brush, None, &shape);
     }
 
-    fn end_frame(&mut self) -> FrameOutcome {
-        match self.present() {
-            Ok(outcome) => outcome,
-            Err(e) => panic!("rendering a frame failed: {e}"),
+    fn end_frame(&mut self) -> Result<FrameOutcome, RenderError> {
+        if let Some(error) = self.lost_device() {
+            return Err(error);
         }
+        self.present()
     }
 }

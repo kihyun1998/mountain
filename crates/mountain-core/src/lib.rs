@@ -53,8 +53,11 @@ pub struct Color {
 pub trait Renderer {
     fn begin_frame(&mut self, size: PhysicalSize);
     fn fill_rect(&mut self, rect: PhysicalRect, color: Color);
-    fn end_frame(&mut self) -> FrameOutcome;
+    fn end_frame(&mut self) -> Result<FrameOutcome, RenderError>;
 }
+
+/// Why a renderer could not draw a frame, such as a lost GPU device.
+pub type RenderError = Box<dyn std::error::Error + Send + Sync>;
 
 /// What became of a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,8 +144,12 @@ impl Core {
         self
     }
 
-    pub fn handle(&mut self, event: WindowEvent, renderer: &mut dyn Renderer) -> Response {
-        match event {
+    pub fn handle(
+        &mut self,
+        event: WindowEvent,
+        renderer: &mut dyn Renderer,
+    ) -> Result<Response, RenderError> {
+        let response = match event {
             WindowEvent::Created { size, scale_factor } => {
                 self.size = Some(size);
                 self.scale_factor = scale_factor;
@@ -176,9 +183,9 @@ impl Core {
             WindowEvent::RedrawRequested => {
                 if self.occluded {
                     self.pending = true;
-                    return Response::default();
+                    return Ok(Response::default());
                 }
-                let outcome = self.draw(renderer);
+                let outcome = self.draw(renderer)?;
                 self.pending = outcome == FrameOutcome::Occluded;
                 Response {
                     redraw: outcome == FrameOutcome::Retry,
@@ -189,12 +196,13 @@ impl Core {
                 redraw: false,
                 exit: true,
             },
-        }
+        };
+        Ok(response)
     }
 
-    fn draw(&self, renderer: &mut dyn Renderer) -> FrameOutcome {
+    fn draw(&self, renderer: &mut dyn Renderer) -> Result<FrameOutcome, RenderError> {
         let Some(size) = self.size.filter(|s| s.width > 0 && s.height > 0) else {
-            return FrameOutcome::Presented;
+            return Ok(FrameOutcome::Presented);
         };
         renderer.begin_frame(size);
         if let Some(color) = self.background {

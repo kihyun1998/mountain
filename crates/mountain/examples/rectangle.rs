@@ -27,7 +27,7 @@ fn main() {
         red,
     );
     let mut platform = WinitPlatform::new("mountain: rectangle", (640.0, 480.0), |window, size| {
-        VelloRenderer::new(window, size).expect("creating the Vello renderer failed")
+        VelloRenderer::new(window, size)
     });
     if let Err(e) = platform.run(&mut core) {
         eprintln!("{e}");

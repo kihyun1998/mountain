@@ -1,7 +1,8 @@
 //! A platform and a renderer for driving the Core with no window and no GPU.
 
 use crate::{
-    Color, Core, FrameOutcome, PhysicalRect, PhysicalSize, Platform, Renderer, WindowEvent,
+    Color, Core, FrameOutcome, PhysicalRect, PhysicalSize, Platform, RenderError, Renderer,
+    WindowEvent,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,6 +22,8 @@ pub struct RecordingRenderer {
     pub frames: Vec<Frame>,
     /// Outcomes to report for the next frames, in order; then `Presented`.
     pub outcomes: Vec<FrameOutcome>,
+    /// An error to report for the next frame instead of an outcome.
+    pub fail_next: Option<String>,
 }
 
 impl Renderer for RecordingRenderer {
@@ -37,11 +40,14 @@ impl Renderer for RecordingRenderer {
             .commands
             .push(Command::FillRect(rect, color));
     }
-    fn end_frame(&mut self) -> FrameOutcome {
+    fn end_frame(&mut self) -> Result<FrameOutcome, RenderError> {
+        if let Some(message) = self.fail_next.take() {
+            return Err(message.into());
+        }
         if self.outcomes.is_empty() {
-            FrameOutcome::Presented
+            Ok(FrameOutcome::Presented)
         } else {
-            self.outcomes.remove(0)
+            Ok(self.outcomes.remove(0))
         }
     }
 }
@@ -65,18 +71,18 @@ impl TestPlatform {
 }
 
 impl Platform for TestPlatform {
-    type Error = std::convert::Infallible;
+    type Error = RenderError;
 
     fn run(&mut self, core: &mut Core) -> Result<(), Self::Error> {
         for event in std::mem::take(&mut self.events) {
-            let response = core.handle(event, &mut self.renderer);
+            let response = core.handle(event, &mut self.renderer)?;
             let mut redraw = response.redraw;
             for _ in 0..100 {
                 if !redraw {
                     break;
                 }
                 redraw = core
-                    .handle(WindowEvent::RedrawRequested, &mut self.renderer)
+                    .handle(WindowEvent::RedrawRequested, &mut self.renderer)?
                     .redraw;
             }
             assert!(!redraw, "the Core kept asking for redraws");
